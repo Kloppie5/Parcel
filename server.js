@@ -1,3 +1,4 @@
+import fs from "fs";
 import http from "http";
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -34,11 +35,29 @@ const server = http.createServer(async (req, res) => {
 
   const start = Date.now();
 
+  let bodyToSend = undefined;
+  let headersToSend = {
+    ...(headers || {}),
+    ...buildAuthHeader(payload.auth)
+  }; // TODO: only add auth header if its not already there; and also obviously support other types of auth
+
+  if (payload.file?.path) {
+    bodyToSend = fs.readFileSync(payload.file.path);
+
+    if (!headersToSend["Content-Type"]) {
+      headersToSend["Content-Type"] = "application/octet-stream";
+    }
+  }
+  else if (payload.body) {
+    bodyToSend = JSON.stringify(payload.body);
+    headersToSend["Content-Type"] = "application/json";
+  }
+
   try {
     const response = await fetch(url, {
       method,
-      headers: headers || {},
-      body: requestBody ? JSON.stringify(requestBody) : undefined,
+      headers: headersToSend,
+      body: bodyToSend,
       agent: new (await import("https")).Agent({
         rejectUnauthorized: false
       })
@@ -68,6 +87,17 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ error: err }));
   }
 });
+
+function buildAuthHeader(auth) {
+  if (!auth || auth.type !== "basic") return {};
+
+  const credentials = `${auth.username}:${auth.password}`;
+  const encoded = Buffer.from(credentials).toString("base64");
+
+  return {
+    Authorization: `Basic ${encoded}`
+  };
+}
 
 server.listen(3000, () => {
   log("Server running on http://localhost:3000");
